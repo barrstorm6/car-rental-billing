@@ -1,36 +1,710 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Car Rental Billing — задание для студента
 
-## Getting Started
+Разработайте backend расчёта стоимости аренды автомобиля для небольшой прокатной компании.
+Репозиторий содержит готовую инфраструктуру и автоматические тесты. Вам нужно самостоятельно
+реализовать бизнес-логику.
 
-First, run the development server:
+Стек: Next.js App Router и Route Handlers, TypeScript strict, PostgreSQL, Prisma ORM, Vitest, Docker
+Compose, Node.js LTS и npm. Интерфейса пользователя нет. React установлен как техническая
+зависимость Next.js.
 
-```bash
+В исходной версии API возвращает HTTP 501 NOT_IMPLEMENTED. Основные тесты должны падать до
+реализации; инфраструктурный набор должен проходить.
+
+## Содержание
+
+- [Быстрый запуск](#быстрый-запуск)
+- [Что нужно реализовать](#что-нужно-реализовать)
+- [Бизнес-контекст](#бизнес-контекст)
+- [Database-first](#database-first)
+- [Модель данных](#модель-данных)
+- [Подготовленные данные](#подготовленные-данные)
+- [Тарифы](#тарифы)
+- [Бизнес-правила расчёта](#бизнес-правила-расчёта)
+- [Разобранный пример](#разобранный-пример)
+- [API-контракты](#api-контракты)
+- [Ошибки и граничные случаи](#ошибки-и-граничные-случаи)
+- [Тесты](#тесты)
+- [Критерии приёмки](#критерии-приёмки)
+- [Диагностика](#диагностика)
+
+## Быстрый запуск
+
+Установите **Node.js 24 LTS**, npm и Docker с Compose v2+. На Windows запустите Docker Desktop в
+режиме Linux containers. Порты 5434 и 5435 должны быть свободны.
+
+~~~sh
+git clone <URL-репозитория>
+cd car-rental-billing
+node -e "require('fs').copyFileSync('.env.example', '.env')"
+npm ci
+npm run db:up
+npm run db:setup
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+~~~
+
+В другом терминале:
+
+~~~sh
+curl http://localhost:3000/api/health
+curl http://localhost:3000/api/rentals/30000000-0000-4000-8000-000000000001/invoice
+curl -X POST http://localhost:3000/api/rentals/30000000-0000-4000-8000-000000000001/close
+~~~
+
+В Windows PowerShell используйте curl.exe либо Invoke-RestMethod. Health возвращает 200; оба учебных
+endpoint до реализации возвращают 501 с JSON error.code = NOT_IMPLEMENTED. Корневой страницы нет.
+
+| Команда            | Действие                                                   |
+|--------------------|------------------------------------------------------------|
+| npm run db:up      | Поднять development PostgreSQL и дождаться готовности      |
+| npm run db:setup   | SQL-миграции → PostgreSQL → db pull → generate → seed      |
+| npm run db:pull    | Получить Prisma Schema из development БД и обновить клиент |
+| npm run db:seed    | Повторить demo seed                                        |
+| npm run db:studio  | Открыть Prisma Studio для development                      |
+| npm run dev        | Запустить Next.js API на 3000                              |
+| npm run typecheck  | Генерация Prisma/Next типов и strict tsc                   |
+| npm run test:infra | Проверить стартовую инфраструктуру, включая 501-заглушки   |
+| npm test           | Все обязательные бизнес-тесты через HTTP                   |
+| npm run test:bonus | Только конкурентное закрытие                               |
+| npm run build      | Проверка production build API                              |
+
+## Что нужно реализовать
+
+Ваша задача — написать бизнес-логику расчёта и атомарного закрытия аренды. PostgreSQL, SQL-миграция,
+данные, DTO и HTTP-тесты подготовлены. Эталонной реализации в репозитории нет.
+
+Основные учебные файлы:
+
+| Файл                                        | Ответственность                                                              |
+|---------------------------------------------|------------------------------------------------------------------------------|
+| `src/services/rental-pricing.service.ts`    | Проверка входных данных и расчёт по правилам ниже                            |
+| `src/services/rental-invoice.service.ts`    | Чтение связанных данных через Prisma, PREVIEW/FINAL, сохранение и транзакция |
+| `src/app/api/rentals/[id]/invoice/route.ts` | GET счёта                                                                    |
+| `src/app/api/rentals/[id]/close/route.ts`   | POST закрытия                                                                |
+
+В каждом route.ts уже создан экземпляр RentalInvoiceService. Обработчики передают ID аренды,
+формируют JSON и обрабатывают ошибки. Методы сервисов пока выбрасывают NOT_IMPLEMENTED. Разберитесь
+с готовой связкой обработчиков и сервисов; при необходимости дополняйте её, сохраняя контракт.
+
+RentalPricingService получает данные через PricingInput и возвращает PricingResult.
+RentalInvoiceService предоставляет getInvoice и closeRental. Типы находятся в src/types/invoice.ts,
+ошибки — в src/errors/api-error.ts, подключение — в src/lib/prisma.ts. Сгенерированный
+src/generated/prisma не редактируйте. В этой версии Next.js context.params — Promise, его нужно
+ожидать.
+
+Можно добавлять небольшие вспомогательные модули и типы. Не меняйте тесты, тарифы или ожидаемые
+результаты ради прохождения проверок. UI, авторизация, внешние API и дополнительные сервисы не
+требуются.
+
+### Структура проекта
+
+~~~text
+prisma/
+  migrations/20261103000000_initial/migration.sql
+  schema.prisma
+  seed.ts
+src/
+  app/api/health/route.ts
+  app/api/rentals/[id]/invoice/route.ts
+  app/api/rentals/[id]/close/route.ts
+  services/
+  types/
+  errors/
+  lib/prisma.ts
+tests/
+  fixtures/
+  helpers/
+  calculations.test.ts
+  late-return.test.ts
+  mileage.test.ts
+  discounts.test.ts
+  invoice-api.test.ts
+  infra.test.ts
+  bonus/concurrent-close.test.ts
+scripts/
+  dev-db.mjs
+  test-runner.mjs
+  process.mjs
+  safety.mjs
+~~~
+
+## Бизнес-контекст
+
+Компания предоставляет автомобили в аренду.
+
+Когда клиент возвращает автомобиль, система должна сформировать итоговый счёт, учитывая:
+
+1. Класс автомобиля.
+2. Длительность аренды.
+3. Опоздание при возврате.
+4. Бесплатный пробег.
+5. Превышение пробега.
+6. Недостающее топливо.
+7. Дополнительную страховку.
+8. Скидку за длительную аренду.
+9. Правила округления.
+10. Состояние аренды и предотвращение повторного списания.
+
+Тарифы должны загружаться из PostgreSQL. Запрещено хардкодить тарифные суммы в бизнес-логике.
+
+Все расчёты ведутся в KZT. Денежные значения хранятся целыми тенге.
+
+Проект учебный. Тарифы условные, налоги и реальные юридические требования к прокату не
+рассматриваются.
+
+## Database-first
+
+Начальная структура целиком находится в одной миграции:
+`prisma/migrations/20261103000000_initial/migration.sql`.
+Источник структуры данных — SQL и PostgreSQL.
+`schema.prisma` — сохранённое представление базы для Prisma Client.
+
+`npm run db:setup` выполняет последовательность:
+
+1. `prisma migrate deploy`: применяет готовые SQL-файлы к development PostgreSQL.
+2. `prisma db pull`: читает таблицы, типы, ограничения и defaults из PostgreSQL.
+3. `prisma generate`: генерирует клиент по результату introspection.
+4. Seed: загружает демонстрационные данные.
+
+Prisma Migrate здесь используется только для выполнения и учёта SQL-миграций.
+Миграции не генерируются из `schema.prisma`. Не используйте `db push`,
+`migrate dev` или `migrate diff --to-schema` для изменения структуры проекта.
+
+Для изменения БД создайте следующую папку `prisma/migrations/<timestamp>_<name>/`
+с написанным вручную `migration.sql`, затем выполните `npm run db:setup`.
+Применённые миграции не редактируйте. `npm run db:pull` позволяет повторить
+только introspection и генерацию клиента без применения миграций и seed.
+
+Имена моделей и отношений (`Car`, `Rental`, `invoice` и другие) сохраняются
+при повторном `db pull` через существующие mappings. Поэтому `schema.prisma`
+хранится в Git; `db pull --force` для обычной работы не требуется.
+Изменения файла после introspection включайте в тот же commit, что и SQL.
+Таблицы, столбцы, индексы и enum-типы в SQL используют `snake_case` без двойных
+кавычек. Prisma сохраняет имена полей TypeScript через `@map`, а моделей и
+enum-типов — через `@@map`. Все PK и FK имеют тип PostgreSQL `uuid`; в Prisma — `String @db.Uuid`.
+Defaults всех ID заданы прямо
+в начальной миграции: `gen_random_uuid()`.
+
+Тестовый runner выполняет ту же цепочку SQL → PostgreSQL → introspection →
+Prisma Client против отдельной test-базы, после чего загружает свои фикстуры.
+`npm ci` и `typecheck` генерируют клиент из сохранённого снимка без доступа к БД.
+
+## Модель данных
+
+Используется database-first: SQL-миграции задают структуру PostgreSQL, затем `prisma db pull`
+получает Prisma Schema из реальной БД. `schema.prisma` хранится как снимок introspection. В SQL
+используется snake_case без кавычек, а имена полей Prisma и API сохраняются через @map. Вся
+начальная структура и defaults находятся в одной SQL-миграции. Порядок работы описан в разделе
+«Database-first».
+
+### Таблица cars
+
+Поля:
+
+- id — UUID, primary key; в TypeScript — string.
+- brand — String.
+- model — String.
+- carClass — enum ECONOMY, SUV.
+- plateNumber — String, unique.
+
+### Таблица pricing_rules
+
+Поля:
+
+- id — UUID, primary key; в TypeScript — string.
+- carClass — enum, unique.
+- dailyRate — Int.
+- graceMinutes — Int.
+- hourlyLateLimitMinutes — Int.
+- lateHourlyRate — Int.
+- includedKmPerDay — Int.
+- excessKmRate — Int.
+- missingFuelPricePerLiter — Int.
+- insuranceDailyRate — Int.
+- longRentalMinDays — Int.
+- longRentalDiscountPercent — Int.
+
+### Таблица rentals
+
+Поля:
+
+- id — UUID, primary key; в TypeScript — string.
+- carId — foreign key.
+- scheduledStartAt — DateTime.
+- scheduledEndAt — DateTime.
+- startOdometerKm — Int.
+- insuranceSelected — Boolean.
+- status — enum OPEN, CLOSED.
+- createdAt — DateTime.
+
+### Таблица rental_returns
+
+Поля:
+
+- id — UUID, primary key; в TypeScript — string.
+- rentalId — foreign key, unique.
+- actualReturnAt — DateTime.
+- endOdometerKm — Int.
+- missingFuelLiters — Int.
+
+### Таблица rental_invoices
+
+Поля:
+
+- id — UUID, primary key; в TypeScript — string.
+- rentalId — foreign key, unique.
+- breakdown — Json.
+- totalAmount — Int.
+- currency — String.
+- createdAt — DateTime.
+
+Отношения, внешние ключи, ограничения уникальности и необходимые индексы уже настроены в
+SQL-миграции.
+
+Дополнительные сущности для выполнения задания не нужны.
+
+### Связи и ограничения
+
+cars 1:N rentals через carId; rentals 1:0..1 rental_returns и rentals 1:0..1 rental_invoices через
+уникальный rentalId. pricing_rules определяется уникальным carClass автомобиля, прямой FK между
+автомобилем и тарифом нет: отсутствие тарифа проверяется API. Все сущности имеют UUID PK,
+представленный строкой в TypeScript.
+plateNumber уникален. Индексы rentals.carId и rentals.status поддерживают выборки. FK запрещают
+удаление связанного родителя. DateTime хранится как timestamptz (3).
+
+В БД намеренно нет CHECK, запрещающего отрицательное топливо, обратный одометр или ошибочный период:
+тесты вводят такие данные, чтобы проверить валидацию API. Тарифы считаются корректными
+неотрицательными данными, скидка — от 0 до 100. Используйте безопасные целочисленные промежуточные
+значения; JSON отдаёт числа, не BigInt. Для учебных входов итог помещается в PostgreSQL Int (до 2
+147 483 647).
+
+## Подготовленные данные
+
+Пять бизнес-таблиц: cars, pricing_rules, rentals, rental_returns, rental_invoices (служебная _
+prisma_migrations отдельно). Seed создаёт 4 машины, 2 тарифа, 24 аренды, 22 возврата и 1 закрытый
+счёт. rental-basic — разобранный пример 80 600 ₸; rental-closed — готовый исторический снимок 20 000
+₸; rental-open-corolla и rental-open-suv не имеют возврата. Остальные сценарии перечислены в
+prisma/seed.ts.
+
+Seed в одной транзакции заменяет только demo-аренды со стабильными ID и их возвраты/счета, обновляет
+demo-машины и тарифы. Повторный запуск не копит дубли. **Повторный seed сбрасывает студенческие
+закрытия demo-аренд.** Другие аренды не удаляются. Development и tests используют разные данные.
+
+### UUID сценариев
+
+Все ID и внешние ключи в PostgreSQL имеют тип uuid. В API UUID передаются строками.
+Имена сценариев — подписи в seed, в URL используется UUID:
+
+| Сценарий            | UUID                                 |
+|---------------------|--------------------------------------|
+| rental-basic        | 30000000-0000-4000-8000-000000000001 |
+| rental-closed       | 30000000-0000-4000-8000-000000000021 |
+| rental-open-corolla | 30000000-0000-4000-8000-000000000022 |
+| rental-open-suv     | 30000000-0000-4000-8000-000000000023 |
+
+Остальные фиксированные UUID указаны в prisma/seed.ts. Новые ID по умолчанию генерирует PostgreSQL.
+
+## Тарифы
+
+| Параметр                    | ECONOMY |    SUV |
+|-----------------------------|--------:|-------:|
+| Сутки                       |  20 000 | 35 000 |
+| Бесплатный пробег в сутки   |  200 км | 300 км |
+| Превышение за 1 км          |      70 |    100 |
+| Час опоздания               |   3 000 |  5 000 |
+| Недостающее топливо за литр |     250 |    400 |
+| Страховка в сутки           |   1 500 |  3 500 |
+| Скидка от 5 суток           |     10% |    10% |
+
+Для обоих классов:
+
+- Бесплатное опоздание: 60 минут.
+- Максимальный диапазон почасового опоздания: 360 минут.
+- Начиная с превышения 360 минут применяется посуточная тарификация опоздания.
+
+## Бизнес-правила расчёта
+
+Это важнейший раздел ТЗ.
+
+Студент обязан реализовать правила строго в указанном порядке.
+
+### Rule 1 — Planned rental days
+
+Плановая длительность аренды:
+
+`plannedDays = ceil((scheduledEndAt - scheduledStartAt) / 24 часа)`
+
+Минимум 1 сутки.
+
+Например:
+
+- 24 часа = 1 сутки.
+- 24 часа и 1 минута = 2 суток.
+- 72 часа = 3 суток.
+
+Если scheduledEndAt меньше либо равно scheduledStartAt, возвращается ошибка `INVALID_RENTAL_PERIOD`.
+
+Все даты передаются в ISO 8601. Расчёты производятся по фактической длительности между
+UTC-временными метками, а не по календарным датам.
+
+### Rule 2 — Late return
+
+Опоздание рассчитывается относительно scheduledEndAt.
+
+`lateMinutes = max(0, ceil((actualReturnAt - scheduledEndAt) / 60000))`
+
+При досрочном возврате опоздание равно нулю.
+
+Условия:
+
+- До 60 минут включительно: бесплатно.
+- От 61 до 360 минут включительно: почасовая доплата.
+- Более 360 минут: дополнительные оплачиваемые сутки вместо почасовой доплаты.
+
+Почасовая доплата:
+
+`lateFee = ceil((lateMinutes - graceMinutes) / 60) * lateHourlyRate`
+
+Эта формула применяется только в почасовом диапазоне.
+
+Если опоздание больше 360 минут:
+
+`extraDays = ceil(lateMinutes / 1440)`
+
+В таком случае `lateFee = 0`, поскольку дополнительные сутки включаются в стоимость аренды.
+
+Примеры:
+
+- 60 минут: 0 ₸.
+- 61 минута: 1 час доплаты.
+- 120 минут: 1 час доплаты.
+- 121 минута: 2 часа доплаты.
+- 360 минут: 5 часов доплаты.
+- 361 минута: 1 дополнительный день.
+- 1440 минут: 1 дополнительный день.
+- 1441 минута: 2 дополнительных дня.
+
+Все пороги и ставки загружать из pricing_rules.
+
+### Rule 3 — Charged days
+
+`chargedDays = plannedDays + extraDays`
+
+Стоимость базовой аренды:
+
+`baseAmount = chargedDays * dailyRate`
+
+### Rule 4 — Long rental discount
+
+Если chargedDays больше либо равно longRentalMinDays, применяется скидка.
+
+`discountAmount = round(baseAmount * discountPercent / 100)`
+
+Округление до ближайшего целого тенге, половина округляется вверх.
+
+Используй надёжную целочисленную арифметику.
+
+Скидка применяется только к baseAmount.
+
+Она не применяется к пробегу, страховке, топливу и почасовому опозданию.
+
+### Rule 5 — Mileage
+
+`distanceKm = endOdometerKm - startOdometerKm`
+
+`includedKm = chargedDays * includedKmPerDay`
+
+`excessKm = max(0, distanceKm - includedKm)`
+
+`mileageFee = excessKm * excessKmRate`
+
+Если конечный одометр меньше начального, возвращается `INVALID_ODOMETER`.
+
+Ровно допустимый пробег не приводит к доплате.
+
+### Rule 6 — Fuel
+
+`fuelFee = missingFuelLiters * missingFuelPricePerLiter`
+
+Если missingFuelLiters = 0, доплата отсутствует.
+
+Отрицательное количество литров недопустимо.
+
+### Rule 7 — Insurance
+
+Если insuranceSelected = true:
+
+`insuranceFee = chargedDays * insuranceDailyRate`
+
+Иначе insuranceFee = 0.
+
+Страховка начисляется за все оплачиваемые сутки, включая дополнительные.
+
+### Rule 8 — Final amount
+
+`totalAmount = baseAmount - discountAmount + lateFee + mileageFee + fuelFee + insuranceFee`
+
+Итоговая сумма должна быть целым неотрицательным числом.
+
+Расчёт должен быть детерминированным при одинаковых входных данных и тарифах.
+
+## Разобранный пример
+
+ECONOMY, план 3 суток по 20 000 ₸, возврат через 300 минут после срока, 680 км, недостаёт 12 л
+топлива, без страховки:
+
+1. plannedDays = 3.
+2. lateMinutes = 300. Это почасовой диапазон. После бесплатных 60 минут: ceil ((300 − 60) / 60) = 4
+   часа; lateFee = 4 × 3 000 = 12 000 ₸.
+3. extraDays = 0; chargedDays = 3; baseAmount = 3 × 20 000 = 60 000 ₸.
+4. 3 < 5, поэтому discountAmount = 0.
+5. includedKm = 3 × 200 = 600; excessKm = 680 − 600 = 80; mileageFee = 80 × 70 = 5 600 ₸.
+6. fuelFee = 12 × 250 = 3 000 ₸.
+7. insuranceFee = 0.
+8. totalAmount = 60 000 − 0 + 12 000 + 5 600 + 3 000 + 0 = **80 600 ₸**.
+
+Этот сценарий имеет имя rental-basic и UUID `30000000-0000-4000-8000-000000000001`.
+
+## API-контракты
+
+Маршруты уже созданы. Реализуйте их бизнес-поведение через сервисы. Параметр `:id` — UUID аренды;
+POST не требует тела запроса.
+
+### GET /api/rentals/:id/invoice
+
+Предварительный расчёт счёта.
+
+Поведение:
+
+1. Найти аренду.
+2. Найти автомобиль.
+3. Получить тариф по классу.
+4. Найти информацию о возврате.
+5. Проверить данные.
+6. Рассчитать итоговую стоимость.
+7. Вернуть детальную структуру расчёта.
+
+Если аренда OPEN, API возвращает PREVIEW, не сохраняя результат в базу.
+
+Если аренда CLOSED, API возвращает сохранённый FINAL invoice, не пересчитывая его.
+
+Пример ответа:
+
+```json
+{
+  "rentalId": "30000000-0000-4000-8000-000000000001",
+  "invoiceId": null,
+  "status": "PREVIEW",
+  "currency": "KZT",
+  "breakdown": {
+    "plannedDays": 3,
+    "lateMinutes": 300,
+    "extraDays": 0,
+    "chargedDays": 3,
+    "distanceKm": 680,
+    "includedKm": 600,
+    "excessKm": 80,
+    "baseAmount": 60000,
+    "discountAmount": 0,
+    "lateFee": 12000,
+    "mileageFee": 5600,
+    "fuelFee": 3000,
+    "insuranceFee": 0
+  },
+  "totalAmount": 80600,
+  "createdAt": null
+}
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Это обязательный формат ответа. Не добавляй другие поля без необходимости.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Для FINAL:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- invoiceId содержит ID сохранённого счёта.
+- status равен FINAL.
+- createdAt содержит ISO-время создания счёта.
+- Остальная структура совпадает с PREVIEW.
 
-## Learn More
+### POST /api/rentals/:id/close
 
-To learn more about Next.js, take a look at the following resources:
+Финальное закрытие аренды.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Алгоритм:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Найти аренду.
+2. Если она уже закрыта, вернуть ранее сохранённый invoice.
+3. Проверить наличие данных возврата.
+4. Выполнить полный расчёт.
+5. Сохранить invoice с полным breakdown.
+6. Изменить статус аренды на CLOSED.
+7. Вернуть сохранённый invoice.
 
-## Deploy on Vercel
+Первое успешное закрытие возвращает HTTP 201.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Повторное закрытие возвращает HTTP 200 с тем же invoiceId и данными счёта.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Операции сохранения invoice и изменения статуса должны выполняться атомарно в одной транзакции
+Prisma.
+
+Не допускать частично закрытой аренды.
+
+Сохранённый invoice является неизменяемым снимком расчёта: изменение pricing_rules после закрытия не
+должно изменять старый счёт.
+
+Для повторного закрытия запрещено повторно создавать invoice или изменять исходные финансовые
+данные.
+
+### Error handling
+
+Используй единый формат ошибки:
+
+```json
+{
+  "error": {
+    "code": "RENTAL_NOT_FOUND",
+    "message": "Rental not found"
+  }
+}
+```
+
+Контракт ошибок:
+
+| HTTP | Code                   | Ситуация                                 |
+|------|------------------------|------------------------------------------|
+| 404  | RENTAL_NOT_FOUND       | Аренда не найдена                        |
+| 409  | RETURN_NOT_RECORDED    | Для открытой аренды отсутствует возврат  |
+| 409  | PRICING_RULE_NOT_FOUND | Не найден тариф                          |
+| 422  | INVALID_RENTAL_PERIOD  | Некорректный период аренды               |
+| 422  | INVALID_RETURN_TIME    | Возврат раньше начала аренды             |
+| 422  | INVALID_ODOMETER       | Некорректные показания одометра          |
+| 422  | INVALID_FUEL_AMOUNT    | Отрицательный объём недостающего топлива |
+
+Не раскрывай внутренние ошибки PostgreSQL в HTTP-ответах.
+
+## Ошибки и граничные случаи
+
+Для отсутствующей аренды верните 404. Для CLOSED сначала верните сохранённый снимок — возврат и
+действующий тариф ему больше не нужны. Для OPEN загрузите тариф и возврат и проверьте входы до
+сохранения. Если одновременно отсутствует тариф и возврат, порядок этих двух ошибок не оценивается.
+Для нескольких некорректных входов соблюдайте порядок правил: период, время возврата, одометр,
+топливо. Повреждённое состояние CLOSED без invoice — внутренняя ошибка 500, без раскрытия
+PostgreSQL. Не превращайте все ошибки в 404.
+
+Граничные случаи: положительная аренда меньше суток; ровно 24 часа; 24 часа + 1 минута; досрочный
+возврат после начала; возврат ровно в начале; опоздание 60/61/120/121/360/361/1440/1441 минут; одна
+миллисекунда за порогом; ровно бесплатный пробег; нулевое топливо; скидка при достижении 5 суток
+дополнительным днём; страховка за дополнительные дни. Опоздание больше 360 минут полностью заменяет
+почасовую доплату дополнительными днями. Скидка округляется half-up (например 10 000,5 → 10 001),
+только с базовой суммы.
+
+GET не должен писать в БД. POST не принимает параметры расчёта в body: все исходные данные уже
+записаны. Первый POST возвращает 201; повторный 200 с идентичным полным JSON. createdAt — ISO 8601
+UTC. После закрытия изменение тарифа или возврата не меняет счёт. Убедитесь, что при реальной ошибке
+записи откатываются обе операции, а не только при ошибке валидации. Конкурентное закрытие —
+отдельный бонус.
+
+## Тесты
+
+~~~sh
+npm run typecheck
+npm run test:infra
+npm test
+npm run test:bonus
+~~~
+
+Всего подготовлено 65 тестов: 57 обязательных бизнес-тестов, 7 инфраструктурных и 1 отдельный
+бонусный. Тесты обращаются к работающему Next.js API по HTTP и проверяют реальные данные PostgreSQL.
+Сервисы и ответы API не подменяются моками.
+
+| Набор        | Что проверяется                                                                                                                                    |
+|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| calculations | 24 часа, 24 часа + 1 минута, 3 суток, ECONOMY/SUV, обновлённый тариф из БД, короткая аренда, UTC и детерминированность                             |
+| late-return  | 0/60/61/120/121/360/361/1440/1441 минут, миллисекунда за порогом, досрочный возврат, изменённые пороги и ставка                                    |
+| mileage      | Пробег ниже/ровно лимиту, превышение на 1 и 80 км, обратный одометр, лимит за дополнительные дни и изменённые ставки                               |
+| discounts    | 4/5 суток, топливо вне скидки, страховка включена/выключена, комбинированные сборы, half-up, дополнительные дни и тарифы из БД                     |
+| invoice-api  | Ошибки, отсутствие записи при GET, полный снимок при POST, CLOSED, повторное закрытие, неизменность после изменения тарифа/возврата и откат записи |
+| infra        | Подключение PostgreSQL, пять таблиц, фикстуры, health, стартовые заглушки, UNIQUE/FK и защита test URL                                             |
+| bonus        | Два одновременных POST создают ровно один invoice и возвращают один снимок с кодами 201 и 200                                                      |
+
+В исходном проекте npm test завершается ненулевым кодом: тесты ожидают готовый бизнес-контракт, а
+получают 501 NOT_IMPLEMENTED. После вашего решения основной набор должен стать зелёным.
+
+Две проверки test:infra специально ожидают стартовый ответ 501. После реализации они перестанут
+проходить; готовое решение оценивается через npm test и typecheck. Бонус не входит в npm test.
+
+### Как запускается окружение
+
+.env содержит DATABASE_URL (development) и TEST_DATABASE_URL (test). Для безопасности разрешены
+только точные локальные URL из .env.example. Test использует отдельный контейнер, базу и роль;
+данные находятся в tmpfs. Никогда не направляйте тесты на рабочую БД.
+
+npm test проверяет Docker, выполняет compose up --wait для db-test, применяет SQL-миграции,
+выполняет db pull и generate, подготавливает
+данные, запускает Next.js на свободном порту с отдельным .next-test и ждёт /api/health. Затем
+запускается Vitest. Перед каждым тестом отдельная test-база сбрасывается транзакционно. Файлы и
+тесты исполняются последовательно; .test-run.lock запрещает второй одновременный запуск.
+Конкурентность бонуса создаётся двумя HTTP-запросами внутри одного теста.
+
+По завершении сервер и его потомки завершаются; test PostgreSQL остаётся запущенным для следующего
+запуска. Development-контейнер и его volume не затрагиваются. Ctrl+C завершает сервер. После
+принудительного убийства самого runner проверьте PID из .test-run.lock, остановите оставшийся
+тестовый сервер при необходимости и удалите lock, только убедившись, что запуска уже нет.
+
+### Проверка сохранения вручную
+
+После реализации запросите GET для rental-basic: ожидается PREVIEW на 80 600 ₸ без новой записи
+счёта. POST для того же UUID должен вернуть 201 FINAL и сохранить invoice вместе со статусом CLOSED.
+Повторный POST возвращает 200 с теми же invoiceId, createdAt и суммой. Измените dailyRate через
+Studio: GET закрытой аренды должен вернуть прежний снимок.
+
+Состояние удобно смотреть через npm run db:studio либо SQL:
+
+~~~sh
+docker compose exec db psql -U rental_dev -d rental_dev -c 'SELECT id, status FROM rentals ORDER BY id;'
+docker compose exec db psql -U rental_dev -d rental_dev -c 'SELECT * FROM rental_invoices;'
+~~~
+
+Проверяйте всю структуру breakdown, а не только итог. Для восстановления demo-данных используйте npm
+run db:seed.
+
+## Критерии приёмки
+
+TypeScript проходит strict typecheck. Все основные API-тесты зелёные после реализации. Все суммы и
+breakdown точны. Тарифы загружаются из PostgreSQL, включая изменённые ставки и пороги. Ошибки
+соответствуют контракту. Нет неявного пересчёта FINAL. Закрытие атомарно; повторное закрытие не
+меняет финансовые записи. Код читаемый, без необоснованных any и без floating-point ошибок денег.
+Бонус оценивается отдельно.
+
+### Оценивание
+
+| Раздел                        | Баллы |
+|-------------------------------|------:|
+| Базовые расчёты               |    20 |
+| Опоздание                     |    20 |
+| Пробег и дополнительные сборы |    20 |
+| Скидки и округления           |    15 |
+| API, сохранение и транзакции  |    20 |
+| Структура и читаемость        |     5 |
+| Всего                         |   100 |
+
+Конкурентное закрытие оценивается отдельно и не снижает базовые 100 баллов.
+
+## Диагностика
+
+- Docker недоступен: запустите Docker Desktop, проверьте docker info и docker compose version; на
+  Windows дайте терминалу доступ к Docker pipe.
+- Порт занят: остановите конфликтующий контейнер/процесс. Не перенаправляйте test на development
+  URL.
+- Ошибка DATABASE_URL: скопируйте .env.example в .env перед npm ci; Prisma config читает .env.
+- При политике npm, блокирующей install scripts, разрешите только скрипты Prisma engines и esbuild
+  после проверки пакетов. Команда npm run typecheck повторно генерирует Prisma Client.
+- Структура меняется через SQL-миграции, написанные вручную. После применения запускается db pull.
+  Не редактируйте schema.prisma для изменения БД; для задания менять структуру не требуется.
+- Остановить базы без удаления development-данных: docker compose stop db db-test. Не используйте
+  down -v для обычной остановки.
+
+Версии Next.js и Prisma фиксируются в package-lock.json; Prisma 7 использует prisma.config.ts и
+@prisma/adapter-pg
+([официальная документация](https://www.prisma.io/docs/orm/v7/reference/prisma-config-reference)).
+Отдельных платных сервисов и внешних API во время работы нет. React — техническая зависимость
+Next.js, компонентов и страниц в проекте нет.

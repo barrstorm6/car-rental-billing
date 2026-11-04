@@ -1,20 +1,6 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  /* config options here */
-  experimental: {
-    agentFeedback: true,
-  },
-  cacheComponents: true,
-  partialPrefetching: true,
-  turbopack: {
-    rules: {
-      "*.css": {
-        loaders: ["@tailwindcss/turbopack"],
-        as: "*.css",
-      },
-    },
-  },
+import type { NextConfig } from 'next';
+const config: NextConfig = {
+  agentRules: false,
+  distDir: process.env.NEXT_DIST_DIR || '.next',
 };
-
-export default nextConfig;
+export default config;

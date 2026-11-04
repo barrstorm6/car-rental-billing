@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Car {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  brand       String
+  model       String
+  carClass    CarClass @map("car_class")
+  plateNumber String   @unique @map("plate_number")
+  rentals     Rental[]
+
+  @@map("cars")
+}
+
+model PricingRule {
+  id                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  carClass                  CarClass @unique @map("car_class")
+  dailyRate                 Int      @map("daily_rate")
+  graceMinutes              Int      @map("grace_minutes")
+  hourlyLateLimitMinutes    Int      @map("hourly_late_limit_minutes")
+  lateHourlyRate            Int      @map("late_hourly_rate")
+  includedKmPerDay          Int      @map("included_km_per_day")
+  excessKmRate              Int      @map("excess_km_rate")
+  missingFuelPricePerLiter  Int      @map("missing_fuel_price_per_liter")
+  insuranceDailyRate        Int      @map("insurance_daily_rate")
+  longRentalMinDays         Int      @map("long_rental_min_days")
+  longRentalDiscountPercent Int      @map("long_rental_discount_percent")
+
+  @@map("pricing_rules")
+}
+
+model Rental {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  carId             String         @map("car_id") @db.Uuid
+  scheduledStartAt  DateTime       @map("scheduled_start_at") @db.Timestamptz(3)
+  scheduledEndAt    DateTime       @map("scheduled_end_at") @db.Timestamptz(3)
+  startOdometerKm   Int            @map("start_odometer_km")
+  insuranceSelected Boolean        @map("insurance_selected")
+  status            RentalStatus   @default(OPEN)
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  invoice           RentalInvoice?
+  rentalReturn      RentalReturn?
+  car               Car            @relation(fields: [carId], references: [id])
+
+  @@index([carId])
+  @@index([status])
+  @@map("rentals")
+}
+
+model RentalReturn {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rentalId          String   @unique @map("rental_id") @db.Uuid
+  actualReturnAt    DateTime @map("actual_return_at") @db.Timestamptz(3)
+  endOdometerKm     Int      @map("end_odometer_km")
+  missingFuelLiters Int      @map("missing_fuel_liters")
+  rental            Rental   @relation(fields: [rentalId], references: [id])
+
+  @@map("rental_returns")
+}
+
+model RentalInvoice {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rentalId    String   @unique @map("rental_id") @db.Uuid
+  breakdown   Json
+  totalAmount Int      @map("total_amount")
+  currency    String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  rental      Rental   @relation(fields: [rentalId], references: [id])
+
+  @@map("rental_invoices")
+}
+
+enum CarClass {
+  ECONOMY
+  SUV
+
+  @@map("car_class")
+}
+
+enum RentalStatus {
+  OPEN
+  CLOSED
+
+  @@map("rental_status")
+}
