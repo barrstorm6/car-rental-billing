@@ -30,9 +30,12 @@ export class RentalPricingService {
     //Rule 2
 
     const actualReturnAt = Math.floor(rentalReturn.actualReturnAt.getTime() / 1000);
+    const graceMinutes = pricingRule.graceMinutes;
+    const lateHourlyRate = pricingRule.lateHourlyRate;
+
     let lateMinutes;
     let lateFee;
-    let extraDays;
+    let extraDays = 0;
     let chargedDays;
 
     if(actualReturnAt < scheduledStartAt){
@@ -59,8 +62,13 @@ export class RentalPricingService {
       lateFee = 0
     }
 
+    //Rule 3
+    const dailyRate = pricingRule.dailyRate;
 
+    chargedDays = plannedDays + extraDays
+    let baseAmount = chargedDays * dailyRate
 
+    //Rule 4
 
 
     //const plannedDays = ceil((scheduledEndAt - scheduledStartAt) / 24 часа)
