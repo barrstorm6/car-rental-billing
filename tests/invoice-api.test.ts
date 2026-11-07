@@ -15,6 +15,44 @@ test.each([0, -1])('invalid rental duration %i', async durationMinutes => {
 test('return before rental start', async () => {
   await expectError(await scenario(prisma, {lateMinutes: -1441}), 422, 'INVALID_RETURN_TIME', 'Invalid return time');
 });
+
+test.each(['GET', 'POST'] as const)('%s accepts return exactly at rental start', async method => {
+  const id = await scenario(prisma, {lateMinutes: -1440, distanceKm: 0});
+  const response = await request(id, method);
+  const body = await response.json();
+  expect(response.status).toBe(method === 'POST' ? 201 : 200);
+  expect(body).toEqual({
+    ...expectedInvoice(id, {distanceKm: 0}),
+    ...(method === 'POST' ? {
+      status: 'FINAL', invoiceId: expect.any(String), createdAt: expect.any(String)
+    } : {})
+  });
+  expect(await prisma.rentalInvoice.count({where: {rentalId: id}})).toBe(method === 'POST' ? 1 : 0);
+  expect((await prisma.rental.findUniqueOrThrow({where: {id}})).status).toBe(method === 'POST' ? 'CLOSED' : 'OPEN');
+});
+
+test.each(['GET', 'POST'] as const)('%s rejects CLOSED rental without invoice before checking tariff or return', async method => {
+  const id = await scenario(prisma, {noReturn: true});
+  await prisma.rental.update({where: {id}, data: {status: 'CLOSED'}});
+  await prisma.pricingRule.delete({where: {carClass: 'ECONOMY'}});
+
+  await expectError(id, 500, 'INTERNAL_ERROR', 'Internal server error', method);
+  expect(await prisma.rentalInvoice.count({where: {rentalId: id}})).toBe(0);
+  expect((await prisma.rental.findUniqueOrThrow({where: {id}})).status).toBe('CLOSED');
+});
+
+for (const method of ['GET', 'POST'] as const) {
+  test.each([
+    [{durationMinutes: 0, lateMinutes: -1, distanceKm: -1, fuel: -1}, 'INVALID_RENTAL_PERIOD', 'Invalid rental period'],
+    [{lateMinutes: -1441, distanceKm: -1, fuel: -1}, 'INVALID_RETURN_TIME', 'Invalid return time'],
+    [{distanceKm: -1, fuel: -1}, 'INVALID_ODOMETER', 'Invalid odometer'],
+  ] as const)(`${method} validates conflicting inputs in order: %s`, async (options, code, message) => {
+    const id = await scenario(prisma, options);
+    await expectError(id, 422, code, message, method);
+    expect(await prisma.rentalInvoice.count({where: {rentalId: id}})).toBe(0);
+    expect((await prisma.rental.findUniqueOrThrow({where: {id}})).status).toBe('OPEN');
+  });
+}
 test('negative fuel', async () => {
   await expectError(await scenario(prisma, {fuel: -1}), 422, 'INVALID_FUEL_AMOUNT', 'Invalid fuel amount');
 });

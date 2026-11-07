@@ -1,4 +1,4 @@
-import {test} from 'vitest';
+import {expect, test} from 'vitest';
 import {prisma} from '../src/lib/prisma';
 import {scenario} from './fixtures/database';
 import {expectError, preview} from './helpers/api';
@@ -11,6 +11,22 @@ test.each([
 test('odometer cannot move backwards', async () => {
   await expectError(await scenario(prisma, {distanceKm: -1}), 422, 'INVALID_ODOMETER', 'Invalid odometer');
 });
+
+for (const method of ['GET', 'POST'] as const) {
+  test.each([
+    [-100, 100],
+    [-200, -100],
+    [100, -100],
+  ])(`${method} rejects negative odometer readings: start %i, end %i`, async (startOdometerKm, endOdometerKm) => {
+    const id = await scenario(prisma);
+    await prisma.rental.update({where: {id}, data: {startOdometerKm}});
+    await prisma.rentalReturn.update({where: {rentalId: id}, data: {endOdometerKm}});
+
+    await expectError(id, 422, 'INVALID_ODOMETER', 'Invalid odometer', method);
+    expect(await prisma.rentalInvoice.count({where: {rentalId: id}})).toBe(0);
+    expect((await prisma.rental.findUniqueOrThrow({where: {id}})).status).toBe('OPEN');
+  });
+}
 test('extra days increase included mileage', async () => {
   await preview(await scenario(prisma, {lateMinutes: 361, distanceKm: 401}), {
     lateMinutes: 361,
