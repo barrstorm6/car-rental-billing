@@ -57,6 +57,8 @@ export class RentalPricingService {
       lateFee = 0
     }
 
+
+
     //Rule 3 — Charged days
 
     let chargedDays = plannedDays + extraDays
@@ -66,9 +68,20 @@ export class RentalPricingService {
 
     if(chargedDays >= pricingRule.longRentalMinDays){
       discountAmount = Math.round(baseAmount * discountPercent / 100)
-
-
     }
+
+    // Rule 5 — Mileage
+
+    if(rentalReturn.endOdometerKm < 0 || rental.startOdometerKm < 0 || rentalReturn.endOdometerKm < rental.startOdometerKm){
+      throw new Error('INVALID_ODOMETER');
+    }
+    let distanceKm = rentalReturn.endOdometerKm - rental.startOdometerKm
+    let includedKm = chargedDays * pricingRule.includedKmPerDay
+
+
+    let excessKm = Math.max(0, distanceKm - includedKm)
+
+   let mileageFee = excessKm * pricingRule.excessKmRate
 
 
 
