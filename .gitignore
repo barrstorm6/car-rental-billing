@@ -19,3 +19,7 @@ next-env.d.ts
 /.idea/
 .DS_Store
 Thumbs.db
+.claude
+.agents
+.windsurf
+skills-lock.json
