@@ -106,7 +106,15 @@ export class RentalPricingService {
     }
 
     //Rule 7
+    const insuranceSelected = rental.insuranceSelected;
+    const insuranceDailyRate = pricingRule.insuranceDailyRate;
+    let insuranceFee;
 
+    if(insuranceSelected===true){
+      insuranceFee = chargedDays * insuranceDailyRate
+    }else{
+      insuranceFee=0;
+    }
 
 
 
