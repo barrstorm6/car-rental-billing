@@ -69,7 +69,13 @@ export class RentalPricingService {
     let baseAmount = chargedDays * dailyRate
 
     //Rule 4
+    const longRentalMinDays = pricingRule.longRentalMinDays;
+    const discountPercent = pricingRule.longRentalDiscountPercent;
+    let discountAmount = 0;
 
+    if(chargedDays>=longRentalMinDays){
+      discountAmount = Math.round(baseAmount * discountPercent / 100);
+    }
 
     //const plannedDays = ceil((scheduledEndAt - scheduledStartAt) / 24 часа)
     //lateMinutes = max(0, ceil((actualReturnAt - scheduledEndAt) / 60000))
