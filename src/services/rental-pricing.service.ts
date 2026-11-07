@@ -77,6 +77,24 @@ export class RentalPricingService {
       discountAmount = Math.round(baseAmount * discountPercent / 100);
     }
 
+    //Rule 5
+    const endOdometerKm = rentalReturn.endOdometerKm;
+    const startOdometerKm = rental.startOdometerKm;
+    const includedKmPerDay = pricingRule.includedKmPerDay;
+    const excessKmRate = pricingRule.excessKmRate;
+
+    const distanceKm = endOdometerKm - startOdometerKm;
+    const includedKm = chargedDays * includedKmPerDay;
+    const excessKm = Math.max(0, distanceKm - includedKm);
+    const mileageFee = excessKm * excessKmRate;
+
+    if(!(includedKm>=0 && excessKm>=0 && mileageFee>=distanceKm)){
+      throw new Error('INVALID_ODOMETER')
+    }
+
+    //Rule 6
+
+
     //const plannedDays = ceil((scheduledEndAt - scheduledStartAt) / 24 часа)
     //lateMinutes = max(0, ceil((actualReturnAt - scheduledEndAt) / 60000))
     //lateFee = ceil((lateMinutes - graceMinutes) / 60) * lateHourlyRate
