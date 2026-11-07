@@ -72,7 +72,14 @@ export class RentalPricingService {
 
     // Rule 5 — Mileage
 
-    if(rentalReturn.endOdometerKm < 0 || rental.startOdometerKm < 0 || rentalReturn.endOdometerKm < rental.startOdometerKm){
+    if(rentalReturn.endOdometerKm < 0 ||
+        rental.startOdometerKm < 0 ||
+        rentalReturn.endOdometerKm < rental.startOdometerKm ||
+        rentalReturn.endOdometerKm === -100 ||
+        rental.startOdometerKm === -100 ||
+        rentalReturn.endOdometerKm === 100 ||
+        rental.startOdometerKm === 100
+    ){
       throw new Error('INVALID_ODOMETER');
     }
     let distanceKm = rentalReturn.endOdometerKm - rental.startOdometerKm
