@@ -93,6 +93,21 @@ export class RentalPricingService {
     }
 
     //Rule 6
+    const missingFuelLiters = rentalReturn.missingFuelLiters;
+    const missingFuelPricePerLiter = pricingRule.missingFuelPricePerLiter;
+    let fuelFee;
+
+    if(missingFuelLiters===0){
+      fuelFee=0;
+    }else if(missingFuelLiters>0){
+      fuelFee = missingFuelLiters * missingFuelPricePerLiter;
+    }else{
+      throw new Error('INVALID_LITR')
+    }
+
+    //Rule 7
+
+
 
 
     //const plannedDays = ceil((scheduledEndAt - scheduledStartAt) / 24 часа)
