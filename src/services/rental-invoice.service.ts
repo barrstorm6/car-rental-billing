@@ -3,6 +3,7 @@ import type {CloseResult, InvoiceDto,InvoiceBreakdown, PricingInput} from '@/typ
 import {Repository} from "../../repositories";
 import {RentalPricingService} from "./rental-pricing.service";
 import type {RentalInvoice} from '@/generated/prisma/client';
+import {prisma} from '@/lib/prisma';
 
 export class RentalInvoiceService {
   async getInvoice(_rentalId: string): Promise<InvoiceDto> {
@@ -48,16 +49,46 @@ export class RentalInvoiceService {
     const rentalPricingService = new RentalPricingService();
     const result = rentalPricingService.calculate(input);
 
-    const invoice: InvoiceDto = { entalId: rental.id, invoiceId: null, status: 'PREVIEW', currency: 'KZT', createdAt: null, breakdown: result.breakdown, totalAmount: result.totalAmount};
-
+    const invoice: InvoiceDto = {rentalId: rental.id, invoiceId: null, status: 'PREVIEW', currency: 'KZT', createdAt: null, breakdown: result.breakdown, totalAmount: result.totalAmount};
     return invoice;
-  }
+  };
 
   async closeRental(_rentalId: string): Promise<CloseResult> {
     // TODO(student): implement the closing contract.
     //Закрыть аренду, атомарно сохранить счёт и статус; при повторном вызове вернуть исходный счёт
+    const invoice = await this.getInvoice(_rentalId);
 
-    throw new ApiError('NOT_IMPLEMENTED');
+    if(invoice.status === 'FINAL'){
+      return {
+        invoice: invoice,
+        created: false
+      };
+    }else{
+      const result = await prisma.$transaction(async (transaction) => {
+        const rentalInvoice = await transaction.rentalInvoice.create({
+          data: {
+            rentalId: invoice.rentalId,
+            breakdown: {...invoice.breakdown},
+            totalAmount: invoice.totalAmount,
+            currency: invoice.currency
+          }
+        });
+
+        await transaction.rental.update({
+          where: {id: invoice.rentalId},
+          data: {
+            status: 'CLOSED'
+          }
+        });
+
+        return rentalInvoice;
+      });
+
+      return {
+        invoice: this.getFinalInvoice(result),
+        created: true
+      };
+    }
   }
 
   private getFinalInvoice(rentalInvoice: RentalInvoice): InvoiceDto {
