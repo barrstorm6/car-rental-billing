@@ -1,7 +1,8 @@
 import {ApiError} from '@/errors/api-error';
-import type {CloseResult, InvoiceDto, PricingInput} from '@/types/invoice';
+import type {CloseResult, InvoiceDto,InvoiceBreakdown, PricingInput} from '@/types/invoice';
 import {Repository} from "../../repositories";
 import {RentalPricingService} from "./rental-pricing.service";
+import type {RentalInvoice} from '@/generated/prisma/client';
 
 export class RentalInvoiceService {
   async getInvoice(_rentalId: string): Promise<InvoiceDto> {
@@ -9,18 +10,47 @@ export class RentalInvoiceService {
     //Загрузить аренду и связанные сущности через Prisma; вернуть PREVIEW для OPEN или сохранённый FINAL для CLOSED
     const repository = new Repository();
 
-    const car = repository.getCar(_rentalId);
-    const rental = repository.getRental(_rentalId);
-    const princingRule = repository.getPricingRule(_rentalId);
-    const rentalReturn = repository.getRentalReturn(_rentalId);
+    const rental = await repository.getRental(_rentalId);
+
+    if(!rental){
+      throw new ApiError('RENTAL_NOT_FOUND');
+    }
+
+    if(rental.status === 'CLOSED'){
+      const rentalInvoice = await repository.getRentalInvoice(rental.id);
+
+      if(!rentalInvoice){
+        throw new ApiError('INTERNAL_ERROR');
+      }
+
+      return this.getFinalInvoice(rentalInvoice);
+    }
+
+    const car = await repository.getCar(rental.carId);
+
+    if(!car){
+      throw new ApiError('INTERNAL_ERROR');
+    }
+
+    const pricingRule = await repository.getPricingRule(car.carClass);
+
+    if(!pricingRule){
+      throw new ApiError('PRICING_RULE_NOT_FOUND');
+    }
+    const rentalReturn = await repository.getRentalReturn(rental.id);
+
+    if(!rentalReturn){
+      throw new ApiError('RETURN_NOT_RECORDED');
+    }
+
+    const input: PricingInput = { rental: rental, car: car, pricingRule: pricingRule, rentalReturn: rentalReturn};
 
     const rentalPricingService = new RentalPricingService();
-    const input : PricingInput= { rental: rental, car: car, pricingRule: princingRule, rentalReturn: rentalReturn }
-    rentalPricingService.calculate(input);
+    const result = rentalPricingService.calculate(input);
 
+    const invoice: InvoiceDto = { entalId: rental.id, invoiceId: null, status: 'PREVIEW', currency: 'KZT', createdAt: null, breakdown: result.breakdown, totalAmount: result.totalAmount};
 
-
-    throw new ApiError('NOT_IMPLEMENTED');
+    return invoice;
   }
 
   async closeRental(_rentalId: string): Promise<CloseResult> {
@@ -28,6 +58,16 @@ export class RentalInvoiceService {
     //Закрыть аренду, атомарно сохранить счёт и статус; при повторном вызове вернуть исходный счёт
 
     throw new ApiError('NOT_IMPLEMENTED');
+  }
+
+  private getFinalInvoice(rentalInvoice: RentalInvoice): InvoiceDto {
+    if(rentalInvoice.currency!=='KZT'){
+      throw new ApiError('INTERNAL_ERROR');
+    }
+
+    const invoice: InvoiceDto = {rentalId: rentalInvoice.rentalId, invoiceId: rentalInvoice.id, status: 'FINAL', currency: rentalInvoice.currency, createdAt: rentalInvoice.createdAt.toISOString(), breakdown: rentalInvoice.breakdown as unknown as InvoiceBreakdown, totalAmount: rentalInvoice.totalAmount};
+
+    return invoice;
   }
 }
 
