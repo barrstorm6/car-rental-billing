@@ -1,20 +1,10 @@
 import { ApiError } from '@/errors/api-error';
-import type { PricingInput, PricingResult } from '@/types/invoice';
-import type {Car, PricingRule, Rental, RentalReturn} from "@/generated/prisma/client";
+import type {InvoiceBreakdown, PricingInput, PricingResult} from '@/types/invoice';
 
-
-
-//PricingResult { breakdown: InvoiceBreakdown; totalAmount: number }
-//export interface InvoiceBreakdown {
-//   plannedDays: number; lateMinutes: number; extraDays: number; chargedDays: number;
-//   distanceKm: number; includedKm: number; excessKm: number; baseAmount: number;
-//   discountAmount: number; lateFee: number; mileageFee: number; fuelFee: number; insuranceFee: number;
-// }
 
 export class RentalPricingService {
   calculate(_input: PricingInput): PricingResult {
     // TODO(student): implement README.md rules.
-    // Проверить исходные данные и рассчитать полный breakdown и totalAmount по правилам ниже
     const { rental, car, pricingRule, rentalReturn} = _input;
 
     //Rule 1
@@ -25,7 +15,7 @@ export class RentalPricingService {
       throw new Error('INVALID_RENTAL_PERIOD')
     }
 
-    const plannedDays = Math.ceil((scheduledEndAt - scheduledStartAt) / 24*60*60)  //секунды
+    const plannedDays = Math.ceil((scheduledEndAt - scheduledStartAt) / 24*60*60*1000)  //секунды
 
     //Rule 2
 
@@ -34,15 +24,9 @@ export class RentalPricingService {
     const lateHourlyRate = pricingRule.lateHourlyRate;
 
     let lateMinutes;
-    let lateFee;
+    let lateFee=0;
     let extraDays = 0;
-    let chargedDays;
 
-    if(actualReturnAt < scheduledStartAt){
-      throw new Error('INVALID_RETURN_TIME')
-    }
-
-    //if(actualReturnAt == scheduledStartAt){}
 
     if(actualReturnAt<=scheduledEndAt){
       lateMinutes = 0;
@@ -50,22 +34,28 @@ export class RentalPricingService {
       lateMinutes = Math.max(0, Math.ceil((actualReturnAt - scheduledEndAt) / 60000))
     }
 
-    if(lateMinutes<=3600){
+    if(actualReturnAt < scheduledStartAt){
+      throw new Error('INVALID_RETURN_TIME')
+    }
+
+    //if(actualReturnAt == scheduledStartAt){}
+
+    const hourlyLateLimitMinutes = pricingRule.hourlyLateLimitMinutes;
+
+    if(lateMinutes<=graceMinutes){
       lateFee=0;
-      extraDays=0;
-      chargedDays=0
-    }else if (lateMinutes>3600 && lateMinutes>=21600){
+      extraDays=0;0
+    }else if (lateMinutes<=hourlyLateLimitMinutes){
       lateFee = Math.ceil((lateMinutes - graceMinutes) / 60) * lateHourlyRate
-    }else if(lateMinutes<21600){
+    }else {
       extraDays = Math.ceil(lateMinutes / 1440);
-      chargedDays = plannedDays + extraDays;
       lateFee = 0
     }
 
+
     //Rule 3
     const dailyRate = pricingRule.dailyRate;
-
-    chargedDays = plannedDays + extraDays
+    const chargedDays = plannedDays + extraDays
     let baseAmount = chargedDays * dailyRate
 
     //Rule 4
@@ -83,14 +73,14 @@ export class RentalPricingService {
     const includedKmPerDay = pricingRule.includedKmPerDay;
     const excessKmRate = pricingRule.excessKmRate;
 
+    if(!(includedKm>=0 && excessKm>=0 && mileageFee>=distanceKm)){
+      throw new Error('INVALID_ODOMETER')
+    }
+
     const distanceKm = endOdometerKm - startOdometerKm;
     const includedKm = chargedDays * includedKmPerDay;
     const excessKm = Math.max(0, distanceKm - includedKm);
     const mileageFee = excessKm * excessKmRate;
-
-    if(!(includedKm>=0 && excessKm>=0 && mileageFee>=distanceKm)){
-      throw new Error('INVALID_ODOMETER')
-    }
 
     //Rule 6
     const missingFuelLiters = rentalReturn.missingFuelLiters;
@@ -108,7 +98,7 @@ export class RentalPricingService {
     //Rule 7
     const insuranceSelected = rental.insuranceSelected;
     const insuranceDailyRate = pricingRule.insuranceDailyRate;
-    let insuranceFee;
+    let insuranceFee=0;
 
     if(insuranceSelected===true){
       insuranceFee = chargedDays * insuranceDailyRate
@@ -116,32 +106,25 @@ export class RentalPricingService {
       insuranceFee=0;
     }
 
+    //Rule 8
+    const totalAmount = baseAmount - discountAmount + lateFee + mileageFee + fuelFee + insuranceFee;
+    if(!(totalAmount>0 && Number.isInteger(totalAmount))){
+      throw new Error('INVALID_TOTAL_AMOUNT')
+    }
 
-
-    //const plannedDays = ceil((scheduledEndAt - scheduledStartAt) / 24 часа)
-    //lateMinutes = max(0, ceil((actualReturnAt - scheduledEndAt) / 60000))
-    //lateFee = ceil((lateMinutes - graceMinutes) / 60) * lateHourlyRate
-    //extraDays = ceil(lateMinutes / 1440)
-
-    //chargedDays = plannedDays + extraDays
-    //baseAmount = chargedDays * dailyRate
-    //discountAmount = round(baseAmount * discountPercent / 100)
-    //distanceKm = endOdometerKm - startOdometerKm
-
-    //includedKm = chargedDays * includedKmPerDay
-
-    //excessKm = max(0, distanceKm - includedKm)
-
-    //mileageFee = excessKm * excessKmRate
-    //fuelFee = missingFuelLiters * missingFuelPricePerLiter
-    //insuranceFee = chargedDays * insuranceDailyRate
-    //totalAmount = baseAmount - discountAmount + lateFee + mileageFee + fuelFee + insuranceFee
-
-
-    //PricingInput { rental: Rental; car: Car; pricingRule: PricingRule; rentalReturn: RentalReturn }
     //PricingResult { breakdown: InvoiceBreakdown; totalAmount: number }
+    const breakdown : InvoiceBreakdown = {
+      plannedDays: plannedDays, lateMinutes: lateMinutes, extraDays: extraDays, chargedDays: chargedDays,
+      distanceKm: distanceKm, includedKm: includedKm, excessKm: excessKm, baseAmount: baseAmount,
+      discountAmount: discountAmount, lateFee: lateFee, mileageFee: mileageFee, fuelFee: fuelFee, insuranceFee: insuranceFee
+    }
 
-    throw new ApiError('NOT_IMPLEMENTED');
+    const result : PricingResult = {
+      breakdown:breakdown,
+      totalAmount : totalAmount
+    }
+
+    return result;
   }
 }
 
