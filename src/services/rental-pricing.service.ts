@@ -73,14 +73,14 @@ export class RentalPricingService {
     const includedKmPerDay = pricingRule.includedKmPerDay;
     const excessKmRate = pricingRule.excessKmRate;
 
-    if(!(includedKm>=0 && excessKm>=0 && mileageFee>=distanceKm)){
-      throw new Error('INVALID_ODOMETER')
-    }
-
     const distanceKm = endOdometerKm - startOdometerKm;
     const includedKm = chargedDays * includedKmPerDay;
     const excessKm = Math.max(0, distanceKm - includedKm);
     const mileageFee = excessKm * excessKmRate;
+
+    if(!(includedKm>=0 && excessKm>=0 && mileageFee>=distanceKm)){
+      throw new Error('INVALID_ODOMETER')
+    }
 
     //Rule 6
     const missingFuelLiters = rentalReturn.missingFuelLiters;
