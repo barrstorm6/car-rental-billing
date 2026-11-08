@@ -4,7 +4,7 @@ import type {PricingResult} from '@/types/invoice';
 
 export class Repository{
      async getCar(id : string){
-        const car = await prisma.car.findMany({
+        const car = await prisma.car.findUnique({
                 where : { id }
             },
         )
@@ -12,23 +12,23 @@ export class Repository{
     }
 
     async getRental(id : string){
-        const rental = await prisma.rental.findMany({
+        const rental = await prisma.rental.findUnique({
                 where : { id }
             },
         )
         return rental;
     }
 
-    async getRentalReturn(id : string){
-        const rentalReturn = await prisma.rentalReturn.findMany({
-                where : { id }
+    async getRentalReturn(rentalId: string){
+        const rentalReturn = await prisma.rentalReturn.findUnique({
+                where : { rentalId }
             },
         )
         return rentalReturn;
     }
 
     async getPricingRule(carClass: CarClass){
-        const pricingRule = await prisma.pricingRule.findMany({
+        const pricingRule = await prisma.pricingRule.findUnique({
                 where : { carClass }
             },
         )
@@ -37,7 +37,7 @@ export class Repository{
 
 
     async getRentalInvoice(rentalId: string){
-        const rentalInvoice  = await prisma.rentalInvoice.findMany({
+        const rentalInvoice  = await prisma.rentalInvoice.findUnique({
                 where : { rentalId }
             },
         )
