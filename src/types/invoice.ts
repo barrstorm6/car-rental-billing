@@ -26,7 +26,8 @@ export interface PricingResult {
 
 export interface InvoiceDto extends PricingResult {
   rentalId: string;
-  invoiceId: string | null; status: 'PREVIEW' | 'FINAL';
+  invoiceId: string | null;
+  status: 'PREVIEW' | 'FINAL';
   currency: 'KZT';
   createdAt: string | null;
 }
