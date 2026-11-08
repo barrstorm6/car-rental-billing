@@ -1,4 +1,6 @@
 import {prisma} from "@/lib/prisma";
+import type {CarClass, Prisma} from '@/generated/prisma/client';
+import type {PricingResult} from '@/types/invoice';
 
 export class Repository{
      async getCar(id : string){
@@ -6,35 +8,40 @@ export class Repository{
                 where : { id }
             },
         )
+         return car;
     }
 
     async getRental(id : string){
-        const rentals = await prisma.rental.findMany({
+        const rental = await prisma.rental.findMany({
                 where : { id }
             },
         )
+        return rental;
     }
 
     async getRentalReturn(id : string){
-        const rentals = await prisma.rentalReturn.findMany({
+        const rentalReturn = await prisma.rentalReturn.findMany({
                 where : { id }
             },
         )
+        return rentalReturn;
     }
 
-    async getPricingRule(id : string){
-        const rentals = await prisma.pricingRule.findMany({
-                where : { id }
+    async getPricingRule(carClass: CarClass){
+        const pricingRule = await prisma.pricingRule.findMany({
+                where : { carClass }
             },
         )
+        return pricingRule;
     }
 
 
-    async getRentalInvoice(id : string){
-        const rentals = await prisma.rentalInvoice.findMany({
-                where : { id }
+    async getRentalInvoice(rentalId: string){
+        const rentalInvoice  = await prisma.rentalInvoice.findMany({
+                where : { rentalId }
             },
         )
+        return rentalInvoice;
     }
 
     async createRentalInvoice(rentalId: string, result: PricingResult){
