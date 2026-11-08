@@ -36,5 +36,29 @@ export class Repository{
             },
         )
     }
+
+    async createRentalInvoice(rentalId: string, result: PricingResult){
+        const rentalInvoice = await prisma.rentalInvoice.create({
+            data: {
+                rentalId: rentalId,
+                breakdown: {...result.breakdown},
+                totalAmount: result.totalAmount,
+                currency: 'KZT'
+            }
+        });
+
+        return rentalInvoice;
+    }
+
+    async closeRental(id: string){
+        const rental = await prisma.rental.update({
+            where: {id},
+            data: {
+                status: 'CLOSED'
+            }
+        });
+
+        return rental;
+    }
 }
 
