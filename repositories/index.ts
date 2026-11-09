@@ -1,6 +1,7 @@
 import {prisma} from "@/lib/prisma";
 import {RentalInvoiceModel} from "@/generated/prisma/models/RentalInvoice";
-import {Car} from "@/generated/prisma/client";
+import {Car, Prisma, RentalStatus} from "@/generated/prisma/client";
+import {InvoiceBreakdown} from "@/types/invoice";
 
 export async function getRentals(rentalId:string){
 return prisma.rental.findUnique({
@@ -45,4 +46,30 @@ export async function getRentalInvoice(rentalId:string):Promise<RentalInvoiceMod
         }
     })
 }
+
+export async function updateRentalStatus(rentalId:string, status:RentalStatus){
+    return prisma.rental.update({
+        where:{
+            id:rentalId
+        },
+        data:{
+            status
+        }
+    })
+
+}
+
+export async function createRentalInvoices(rentalId:string, breakdown:InvoiceBreakdown, totalAmount: number,currency:string){
+    const jsonBreakdown: Prisma.InputJsonObject = { ...breakdown };
+
+    return prisma.rentalInvoice.create({
+        data:{
+            rentalId:rentalId,
+            breakdown: jsonBreakdown,
+            totalAmount,
+            currency
+        }
+    })
+}
+
 

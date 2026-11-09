@@ -1,8 +1,14 @@
 import {ApiError} from '@/errors/api-error';
-import {CloseResult, InvoiceBreakdown, InvoiceDto, PricingResult} from '@/types/invoice';
-import {getCar, getPricingRule, getRentalReturns, getRentals} from "../../repositories";
+import {CloseResult, InvoiceBreakdown, InvoiceDto, parseInvoiceBreakdown} from '@/types/invoice';
+import {
+  createRentalInvoices,
+  getCar,
+  getPricingRule,
+  getRentalReturns,
+  getRentals,
+  updateRentalStatus
+} from "../../repositories";
 import {RentalPricingService} from "@/services/rental-pricing.service";
-import type { Car, PricingRule, Rental, RentalReturn } from '../generated/prisma/client';
 
 
 
@@ -64,8 +70,73 @@ export class RentalInvoiceService {
   }
 
   async closeRental(_rentalId: string): Promise<CloseResult> {
-    // TODO(student): implement the closing contract.
-    throw new ApiError('NOT_IMPLEMENTED');
+
+    // Получила аренду
+    const rental = await getRentals(_rentalId)
+    if(!rental) {
+      throw new ApiError('RENTAL_NOT_FOUND')
+    }
+
+    // Если аренда закрыта
+    if (rental.status === 'CLOSED') {
+      if (!rental.invoice) {
+        throw new ApiError('RENTAL_NOT_FOUND');
+      }
+
+      const invoice: InvoiceDto = {
+        rentalId: _rentalId,
+        invoiceId: rental.invoice.id,
+        status: 'FINAL',
+        currency: 'KZT',
+        createdAt: rental.invoice.createdAt.toISOString(),
+        breakdown: parseInvoiceBreakdown(rental.invoice.breakdown),
+        totalAmount: rental.invoice.totalAmount
+      }
+      return {
+        created: false,
+        invoice
+      }
+    }
+
+    // Проверила наличие возврата
+    const rentalReturn = await getRentalReturns(_rentalId)
+    if (!rentalReturn) {
+      throw new ApiError('RENTAL_NOT_FOUND')
+    }
+
+    // Посчитала стоимость
+    const car = await getCar(rental.carId)
+    if (!car) {
+      throw new ApiError('RENTAL_NOT_FOUND')
+    }
+    const pricingRule = await getPricingRule(car)
+    if (!pricingRule) {
+      throw new ApiError('PRICING_RULE_NOT_FOUND');
+    }
+    const input = {
+      rental,
+      car,
+      pricingRule,
+      rentalReturn
+    }
+    const rentalPriceService =  new RentalPricingService()
+    const rentalAmount = rentalPriceService.calculate(input)
+   const newInvoice = await createRentalInvoices(_rentalId, rentalAmount.breakdown, rentalAmount.totalAmount,'KZT')
+    updateRentalStatus(_rentalId, 'CLOSED')
+
+    const invoice: InvoiceDto = {
+      rentalId: newInvoice.rentalId,
+      invoiceId: newInvoice.id,
+      status:'FINAL',
+      breakdown:rentalAmount.breakdown,
+      totalAmount: newInvoice.totalAmount,
+      currency:'KZT',
+      createdAt:newInvoice.createdAt.toISOString()
+    }
+    return {
+      created:true,
+      invoice
+    }
   }
 }
 
