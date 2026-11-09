@@ -1,10 +1,10 @@
-import { ApiError } from '@/errors/api-error';
-import {InvoiceBreakdown, PricingInput, PricingResult} from '@/types/invoice';
+import { PricingInput, PricingResult} from '@/types/invoice';
+import {ApiError} from "@/errors/api-error";
 
 
 export class RentalPricingService {
   calculate(_input: PricingInput): PricingResult {
-    const{rental, car, pricingRule, rentalReturn} = _input
+    const{rental, pricingRule, rentalReturn} = _input
     let extraDays = 0
     let discountAmount = 0
     let discountPercent = pricingRule.longRentalDiscountPercent
@@ -13,27 +13,25 @@ export class RentalPricingService {
 
 
     // Rule 1 — Planned rental days расчет дней
-    const scheduledEndAt = Math.floor(rental.scheduledEndAt.getTime() / 1000);
-    const scheduledStartAt = Math.floor(rental.scheduledStartAt.getTime() / 1000);
-
-
+    const scheduledEndAt = rental.scheduledEndAt.getTime();
+    const scheduledStartAt = rental.scheduledStartAt.getTime();
     if(scheduledEndAt <= scheduledStartAt){
-      throw new Error('INVALID_RENTAL_PERIOD');
-    }
-    let plannedDays = Math.ceil((scheduledEndAt - scheduledStartAt) / 24 )
-    if(plannedDays > 0){
-      throw new Error('INVALID_RENTAL_PERIOD');
-    }
-    if (!Number.isInteger(plannedDays)){
-      plannedDays + 1
+      throw new ApiError('INVALID_RENTAL_PERIOD');
     }
 
+    const rentalDuration = scheduledEndAt - scheduledStartAt
+
+
+    const plannedDays = Math.max(
+        1,
+        Math.ceil(rentalDuration / 86400000)
+    );
 
     // Rule 2 — Late return
 
     const actualReturnAt = rentalReturn.actualReturnAt.getTime();
     if(actualReturnAt < scheduledStartAt){
-      throw new Error('INVALID_RETURN_TIME');
+      throw new ApiError('INVALID_RETURN_TIME');
     }
     let lateMinutes = Math.max(0, Math.ceil((actualReturnAt - scheduledEndAt) / 60000))
     let lateFee = 0
@@ -63,7 +61,7 @@ export class RentalPricingService {
         rental.startOdometerKm < 0 ||
         rentalReturn.endOdometerKm < rental.startOdometerKm
     ){
-      throw new Error('INVALID_ODOMETER');
+      throw new ApiError('INVALID_ODOMETER');
     }
     let distanceKm = rentalReturn.endOdometerKm - rental.startOdometerKm
     let includedKm = chargedDays * pricingRule.includedKmPerDay
@@ -73,7 +71,9 @@ export class RentalPricingService {
 
     //Rule 6 — Fuel
 
-    if(rentalReturn.missingFuelLiters < 0){ throw new Error('INVALID_LITERS');}
+    if(!Number.isFinite(rentalReturn.missingFuelLiters) ||
+        rentalReturn.missingFuelLiters < 0)
+    { throw new ApiError('INVALID_FUEL_AMOUNT');}
 
     fuelFee = rentalReturn.missingFuelLiters * pricingRule.missingFuelPricePerLiter
 
@@ -87,7 +87,7 @@ export class RentalPricingService {
 
     const totalAmount = baseAmount - discountAmount + lateFee + mileageFee + fuelFee + insuranceFee
     if (!Number.isSafeInteger(totalAmount) || totalAmount < 0) {
-      throw new Error('INVALID_TOTAL_AMOUNT');
+      throw new ApiError('INTERNAL_ERROR');
     }
 
     return {

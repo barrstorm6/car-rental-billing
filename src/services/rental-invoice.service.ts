@@ -1,5 +1,5 @@
 import {ApiError} from '@/errors/api-error';
-import {CloseResult, InvoiceBreakdown, InvoiceDto} from '@/types/invoice';
+import {CloseResult, InvoiceDto} from '@/types/invoice';
 import {
   createRentalInvoices,
   getCar,
@@ -15,61 +15,74 @@ import {InvoiceBreakdownSchema} from "@/schemas/invoice.schema";
 
 export class RentalInvoiceService {
 
-  async  getInvoice(_rentalId: string): Promise<InvoiceDto> {
-    const response = {} as InvoiceDto;
+  async getInvoice(_rentalId: string): Promise<InvoiceDto> {
+    // 1. Получаем аренду
+    const rental = await getRentals(_rentalId);
 
-    // Получила аренду
-    const rental = await getRentals(_rentalId)
     if (!rental) {
-      throw new ApiError('RENTAL_NOT_FOUND')
+      throw new ApiError('RENTAL_NOT_FOUND');
     }
-    response.rentalId = rental.id;
 
+    // 2. Если аренда закрыта — возвращаем сохранённый FINAL invoice
+    if (rental.status === 'CLOSED') {
+      if (!rental.invoice) {
+        throw new ApiError('INTERNAL_ERROR');
+      }
 
-    // Получила айди чека
-    const invoiceId = rental.invoice?.id ?? null
-    response.invoiceId = invoiceId;
-    //Получила статус
-    const rentalStatus = rental.status
-    let status: 'PREVIEW' | 'FINAL' = 'PREVIEW';
-    if(rentalStatus === 'CLOSED') {
-      status = 'FINAL'
+      return {
+        rentalId: rental.invoice.rentalId,
+        invoiceId: rental.invoice.id,
+        status: 'FINAL',
+        currency: 'KZT',
+        breakdown: InvoiceBreakdownSchema.parse(rental.invoice.breakdown,),
+        totalAmount: rental.invoice.totalAmount,
+        createdAt: rental.invoice.createdAt.toISOString(),
+      };
     }
-    response.status = status;
-    // Получила дату создания
-    const createdAt = rental.createdAt.toISOString()
-    response.createdAt = createdAt;
 
-    // Получаем цену
-    const car = await getCar(rental.carId)
+    // 3. Получаем автомобиль
+    const car = await getCar(rental.carId);
+
     if (!car) {
-      throw new ApiError('RENTAL_NOT_FOUND')
+      throw new ApiError('INTERNAL_ERROR');
     }
 
-    const pricingRule = await getPricingRule(car)
+    // 4. Получаем тариф
+    const pricingRule = await getPricingRule(car);
+
     if (!pricingRule) {
       throw new ApiError('PRICING_RULE_NOT_FOUND');
     }
-    const rentalReturn = await getRentalReturns(_rentalId)
+
+    // 5. Получаем информацию о возврате
+    const rentalReturn = await getRentalReturns(_rentalId);
+
     if (!rentalReturn) {
-      throw new ApiError('RENTAL_NOT_FOUND');
+      throw new ApiError('RETURN_NOT_RECORDED');
     }
-    const rentalPriceService =  new RentalPricingService()
+
+    // 6. Рассчитываем стоимость
     const input = {
       rental,
       car,
       pricingRule,
-      rentalReturn
-    }
-    const rentalPrice = await rentalPriceService.calculate(input)
-    response.breakdown = rentalPrice.breakdown;
-    response.totalAmount = rentalPrice.totalAmount;
+      rentalReturn,
+    };
 
-    return response
+    const rentalPriceService = new RentalPricingService();
+    const rentalPrice = rentalPriceService.calculate(input);
 
-
+    // 7. Возвращаем PREVIEW
+    return {
+      rentalId: rental.id,
+      invoiceId: null,
+      status: 'PREVIEW',
+      currency: 'KZT',
+      breakdown: rentalPrice.breakdown,
+      totalAmount: rentalPrice.totalAmount,
+      createdAt: null,
+    };
   }
-
   async closeRental(_rentalId: string): Promise<CloseResult> {
 
     // Получила аренду
@@ -81,7 +94,7 @@ export class RentalInvoiceService {
     // Если аренда закрыта
     if (rental.status === 'CLOSED') {
       if (!rental.invoice) {
-        throw new ApiError('RENTAL_NOT_FOUND');
+        throw new ApiError('INTERNAL_ERROR');
       }
 
       const invoice: InvoiceDto = {
@@ -93,6 +106,7 @@ export class RentalInvoiceService {
         breakdown: InvoiceBreakdownSchema.parse(rental.invoice.breakdown,),
         totalAmount: rental.invoice.totalAmount
       }
+
       return {
         created: false,
         invoice
@@ -102,13 +116,13 @@ export class RentalInvoiceService {
     // Проверила наличие возврата
     const rentalReturn = await getRentalReturns(_rentalId)
     if (!rentalReturn) {
-      throw new ApiError('RENTAL_NOT_FOUND')
+      throw new ApiError('RETURN_NOT_RECORDED')
     }
 
     // Посчитала стоимость
     const car = await getCar(rental.carId)
     if (!car) {
-      throw new ApiError('RENTAL_NOT_FOUND')
+      throw new ApiError('INTERNAL_ERROR')
     }
     const pricingRule = await getPricingRule(car)
     if (!pricingRule) {
@@ -123,7 +137,7 @@ export class RentalInvoiceService {
     const rentalPriceService =  new RentalPricingService()
     const rentalAmount = rentalPriceService.calculate(input)
    const newInvoice = await createRentalInvoices(_rentalId, rentalAmount.breakdown, rentalAmount.totalAmount,'KZT')
-    updateRentalStatus(_rentalId, 'CLOSED')
+    await updateRentalStatus(_rentalId, 'CLOSED')
 
     const invoice: InvoiceDto = {
       rentalId: newInvoice.rentalId,
