@@ -38,32 +38,4 @@ export interface RentalRouteContext {
   params: Promise<{ id: string }>
 }
 
-export function parseInvoiceBreakdown(value:Prisma.JsonValue):InvoiceBreakdown{
-  if(typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error('Invalid invoice breakdown');
-  }
-
-  const getNumber = (key: keyof InvoiceBreakdown)=>{
-    const field = value[key]
-    if(typeof field !== 'number' || !Number.isFinite(field)){
-      throw new Error(`Invalid invoice breakdown field: ${key}`);
-    }
-    return field
-  }
-  return {
-    plannedDays: getNumber('plannedDays'),
-    lateMinutes: getNumber('lateMinutes'),
-    extraDays: getNumber('extraDays'),
-    chargedDays: getNumber('chargedDays'),
-    distanceKm: getNumber('distanceKm'),
-    includedKm: getNumber('includedKm'),
-    excessKm: getNumber('excessKm'),
-    baseAmount: getNumber('baseAmount'),
-    discountAmount: getNumber('discountAmount'),
-    lateFee: getNumber('lateFee'),
-    mileageFee: getNumber('mileageFee'),
-    fuelFee: getNumber('fuelFee'),
-    insuranceFee: getNumber('insuranceFee'),
-  }
-}
 

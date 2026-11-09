@@ -1,5 +1,5 @@
 import {ApiError} from '@/errors/api-error';
-import {CloseResult, InvoiceBreakdown, InvoiceDto, parseInvoiceBreakdown} from '@/types/invoice';
+import {CloseResult, InvoiceBreakdown, InvoiceDto} from '@/types/invoice';
 import {
   createRentalInvoices,
   getCar,
@@ -9,6 +9,7 @@ import {
   updateRentalStatus
 } from "../../repositories";
 import {RentalPricingService} from "@/services/rental-pricing.service";
+import {InvoiceBreakdownSchema} from "@/schemas/invoice.schema";
 
 
 
@@ -89,7 +90,7 @@ export class RentalInvoiceService {
         status: 'FINAL',
         currency: 'KZT',
         createdAt: rental.invoice.createdAt.toISOString(),
-        breakdown: parseInvoiceBreakdown(rental.invoice.breakdown),
+        breakdown: InvoiceBreakdownSchema.parse(rental.invoice.breakdown,),
         totalAmount: rental.invoice.totalAmount
       }
       return {
