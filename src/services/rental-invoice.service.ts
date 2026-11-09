@@ -136,8 +136,9 @@ export class RentalInvoiceService {
     }
     const rentalPriceService =  new RentalPricingService()
     const rentalAmount = rentalPriceService.calculate(input)
-   const newInvoice = await createRentalInvoices(_rentalId, rentalAmount.breakdown, rentalAmount.totalAmount,'KZT')
     await updateRentalStatus(_rentalId, 'CLOSED')
+
+    const newInvoice = await createRentalInvoices(_rentalId, rentalAmount.breakdown, rentalAmount.totalAmount,'KZT')
 
     const invoice: InvoiceDto = {
       rentalId: newInvoice.rentalId,

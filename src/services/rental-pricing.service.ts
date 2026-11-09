@@ -20,7 +20,9 @@ export class RentalPricingService {
     }
 
     const rentalDuration = scheduledEndAt - scheduledStartAt
-
+    if(rentalDuration <= 0){
+      throw new ApiError('INVALID_RENTAL_PERIOD');
+    }
 
     const plannedDays = Math.max(
         1,
@@ -30,16 +32,17 @@ export class RentalPricingService {
     // Rule 2 — Late return
 
     const actualReturnAt = rentalReturn.actualReturnAt.getTime();
+    // время возврата раньше или во время начала аренды
     if(actualReturnAt < scheduledStartAt){
       throw new ApiError('INVALID_RETURN_TIME');
     }
     let lateMinutes = Math.max(0, Math.ceil((actualReturnAt - scheduledEndAt) / 60000))
     let lateFee = 0
 
-    if(lateMinutes >= 61 && lateMinutes <= 360){
+    if(lateMinutes >= pricingRule.graceMinutes && lateMinutes <= pricingRule.hourlyLateLimitMinutes){
       lateFee = Math.ceil((lateMinutes - pricingRule.graceMinutes) / 60) * pricingRule.lateHourlyRate
     }
-    if(lateMinutes > 360){
+    if(lateMinutes > pricingRule.hourlyLateLimitMinutes){
       extraDays = Math.ceil(lateMinutes / 1440)
     }
 

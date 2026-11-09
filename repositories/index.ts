@@ -34,7 +34,7 @@ export async function getPricingRule(car: Car) {
 export async function getRentalReturns(returnsId:string){
     return prisma.rentalReturn.findUnique({
         where:{
-            id:returnsId,
+            rentalId:returnsId,
         }
     })
 }
