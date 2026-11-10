@@ -7,9 +7,9 @@ export class RentalPricingService {
     // TODO(student): implement README.md rules.
     const { rental, car, pricingRule, rentalReturn} = _input;
 
-    const scheduledEndAt = rental.scheduledEndAt.getTime() / 60000;
-    const scheduledStartAt = rental.scheduledStartAt.getTime() / 60000;
-    const actualReturnAt = rentalReturn.actualReturnAt.getTime() / 60000; //minutes
+    const scheduledEndAt = rental.scheduledEndAt.getTime() / 1000;
+    const scheduledStartAt =rental.scheduledStartAt.getTime() / 1000;
+    const actualReturnAt = rentalReturn.actualReturnAt.getTime() / 1000; //seconds
 
     const graceMinutes = pricingRule.graceMinutes;
     const lateHourlyRate = pricingRule.lateHourlyRate;
@@ -26,12 +26,13 @@ export class RentalPricingService {
     const missingFuelPricePerLiter = pricingRule.missingFuelPricePerLiter;
     const insuranceSelected = rental.insuranceSelected;
     const insuranceDailyRate = pricingRule.insuranceDailyRate;
+    const hourlyLateLimitMinutes = pricingRule.hourlyLateLimitMinutes;
 
     if(scheduledEndAt<=scheduledStartAt){
       throw new ApiError('INVALID_RENTAL_PERIOD')
     }
 
-    if(actualReturnAt < scheduledEndAt){
+    if(actualReturnAt < scheduledStartAt){
       throw new ApiError('INVALID_RETURN_TIME')
     }
 
@@ -46,18 +47,19 @@ export class RentalPricingService {
 
 
     //Rule 1
-    const plannedDays = Math.ceil((scheduledEndAt/60 - scheduledStartAt/60) / 24 )  //sutki
+    const plannedDays = Math.ceil((scheduledEndAt/3600 - scheduledStartAt/3600) / 24 )  //sutki
 
     //Rule 2 — Late return
-    let lateMinutes = Math.max(0, Math.ceil(actualReturnAt - scheduledEndAt)) //minutes
+
+    let lateMinutes = Math.max(0, Math.ceil((actualReturnAt - scheduledEndAt) /60)) //minutes
     let lateFee = 0;
     let extraDays = 0;
 
-    if(lateMinutes <= 60){
+    if(lateMinutes <= graceMinutes){
       lateFee = 0;
-    }else if(lateMinutes > 60 && lateMinutes <= 360){
+    }else if(lateMinutes > graceMinutes && lateMinutes <= hourlyLateLimitMinutes){
       lateFee = Math.ceil((lateMinutes - graceMinutes)/60) *  lateHourlyRate; //hours
-    }else if(lateMinutes > 360){
+    }else if(lateMinutes > hourlyLateLimitMinutes){
       extraDays = Math.ceil(lateMinutes / 1440) //sutki
     }
 
