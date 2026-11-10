@@ -7,110 +7,90 @@ export class RentalPricingService {
     // TODO(student): implement README.md rules.
     const { rental, car, pricingRule, rentalReturn} = _input;
 
-    //Rule 1
-    const scheduledEndAt = Math.floor(rental.scheduledEndAt.getTime() / 1000); //секунды
-    const scheduledStartAt = Math.floor(rental.scheduledStartAt.getTime() / 1000);
+    const scheduledEndAt = rental.scheduledEndAt.getTime() / 60000;
+    const scheduledStartAt = rental.scheduledStartAt.getTime() / 60000;
+    const actualReturnAt = rentalReturn.actualReturnAt.getTime() / 60000; //minutes
 
-    if(scheduledEndAt<=scheduledStartAt){
-      throw new Error('INVALID_RENTAL_PERIOD')
-    }
-
-    const plannedDays = Math.ceil((scheduledEndAt - scheduledStartAt) / 24*60*60*1000)  //секунды
-
-    //Rule 2
-
-    const actualReturnAt = Math.floor(rentalReturn.actualReturnAt.getTime() / 1000);
     const graceMinutes = pricingRule.graceMinutes;
     const lateHourlyRate = pricingRule.lateHourlyRate;
-
-    let lateMinutes;
-    let lateFee=0;
-    let extraDays = 0;
-
-
-    if(actualReturnAt<=scheduledEndAt){
-      lateMinutes = 0;
-    }else {
-      lateMinutes = Math.max(0, Math.ceil((actualReturnAt - scheduledEndAt) / 60000))
-    }
-
-    if(actualReturnAt < scheduledStartAt){
-      throw new Error('INVALID_RETURN_TIME')
-    }
-
-    //if(actualReturnAt == scheduledStartAt){}
-
-    const hourlyLateLimitMinutes = pricingRule.hourlyLateLimitMinutes;
-
-    if(lateMinutes<=graceMinutes){
-      lateFee=0;
-      extraDays=0;0
-    }else if (lateMinutes<=hourlyLateLimitMinutes){
-      lateFee = Math.ceil((lateMinutes - graceMinutes) / 60) * lateHourlyRate
-    }else {
-      extraDays = Math.ceil(lateMinutes / 1440);
-      lateFee = 0
-    }
-
-
-    //Rule 3
     const dailyRate = pricingRule.dailyRate;
-    const chargedDays = plannedDays + extraDays
-    let baseAmount = chargedDays * dailyRate
-
-    //Rule 4
     const longRentalMinDays = pricingRule.longRentalMinDays;
-    const discountPercent = pricingRule.longRentalDiscountPercent;
-    let discountAmount = 0;
+    const longRentalDiscountPercent = pricingRule.longRentalDiscountPercent;
 
-    if(chargedDays>=longRentalMinDays){
-      discountAmount = Math.round(baseAmount * discountPercent / 100);
-    }
-
-    //Rule 5
     const endOdometerKm = rentalReturn.endOdometerKm;
     const startOdometerKm = rental.startOdometerKm;
     const includedKmPerDay = pricingRule.includedKmPerDay;
     const excessKmRate = pricingRule.excessKmRate;
 
+    const missingFuelLiters = rentalReturn.missingFuelLiters;
+    const missingFuelPricePerLiter = pricingRule.missingFuelPricePerLiter;
+    const insuranceSelected = rental.insuranceSelected;
+    const insuranceDailyRate = pricingRule.insuranceDailyRate;
+
+    if(scheduledEndAt<=scheduledStartAt){
+      throw new ApiError('INVALID_RENTAL_PERIOD')
+    }
+
+    if(actualReturnAt < scheduledEndAt){
+      throw new ApiError('INVALID_RETURN_TIME')
+    }
+
+    if(endOdometerKm<0 || startOdometerKm<0 || endOdometerKm < startOdometerKm ){
+      throw new ApiError('INVALID_ODOMETER')
+    }
+
+    if(missingFuelLiters < 0){
+      throw new ApiError('INVALID_FUEL_AMOUNT')
+    }
+
+
+
+    //Rule 1
+    const plannedDays = Math.ceil((scheduledEndAt/60 - scheduledStartAt/60) / 24 )  //sutki
+
+    //Rule 2 — Late return
+    let lateMinutes = Math.max(0, Math.ceil(actualReturnAt - scheduledEndAt)) //minutes
+    let lateFee = 0;
+    let extraDays = 0;
+
+    if(lateMinutes <= 60){
+      lateFee = 0;
+    }else if(lateMinutes > 60 && lateMinutes <= 360){
+      lateFee = Math.ceil((lateMinutes - graceMinutes)/60) *  lateHourlyRate; //hours
+    }else if(lateMinutes > 360){
+      extraDays = Math.ceil(lateMinutes / 1440) //sutki
+    }
+
+    //Rule 3 — Charged days
+    const chargedDays = plannedDays + extraDays
+    const baseAmount = chargedDays * dailyRate
+
+    // Rule 4 — Long rental discount
+
+    let discountAmount = 0;
+    if(chargedDays >= longRentalMinDays){
+      discountAmount = Math.round(baseAmount * longRentalDiscountPercent/ 100);
+    }
+
+    // Rule 5 — Mileage
+    // Ровно допустимый пробег не приводит к доплате.
     const distanceKm = endOdometerKm - startOdometerKm;
     const includedKm = chargedDays * includedKmPerDay;
     const excessKm = Math.max(0, distanceKm - includedKm);
     const mileageFee = excessKm * excessKmRate;
 
-    if(!(includedKm>=0 && excessKm>=0 && mileageFee>=distanceKm)){
-      throw new Error('INVALID_ODOMETER')
-    }
+    //Rule 6 - Fuel
+    const fuelFee =  missingFuelLiters * missingFuelPricePerLiter;
 
-    //Rule 6
-    const missingFuelLiters = rentalReturn.missingFuelLiters;
-    const missingFuelPricePerLiter = pricingRule.missingFuelPricePerLiter;
-    let fuelFee;
-
-    if(missingFuelLiters===0){
-      fuelFee=0;
-    }else if(missingFuelLiters>0){
-      fuelFee = missingFuelLiters * missingFuelPricePerLiter;
-    }else{
-      throw new Error('INVALID_LITR')
-    }
-
-    //Rule 7
-    const insuranceSelected = rental.insuranceSelected;
-    const insuranceDailyRate = pricingRule.insuranceDailyRate;
+    //Rule 7 — Insurance
     let insuranceFee=0;
 
-    if(insuranceSelected===true){
+    if(insuranceSelected){
       insuranceFee = chargedDays * insuranceDailyRate
-    }else{
-      insuranceFee=0;
     }
 
-    //Rule 8
-    const totalAmount = baseAmount - discountAmount + lateFee + mileageFee + fuelFee + insuranceFee;
-    if(!(totalAmount>0 && Number.isInteger(totalAmount))){
-      throw new Error('INVALID_TOTAL_AMOUNT')
-    }
+    //Rule 8 - totalAmount
+    const totalAmount = Math.ceil(baseAmount - discountAmount + lateFee + mileageFee + fuelFee + insuranceFee);
 
     //PricingResult { breakdown: InvoiceBreakdown; totalAmount: number }
     const breakdown : InvoiceBreakdown = {
@@ -119,12 +99,7 @@ export class RentalPricingService {
       discountAmount: discountAmount, lateFee: lateFee, mileageFee: mileageFee, fuelFee: fuelFee, insuranceFee: insuranceFee
     }
 
-    const result : PricingResult = {
-      breakdown:breakdown,
-      totalAmount : totalAmount
-    }
-
-    return result;
+    return { breakdown:breakdown, totalAmount : totalAmount}
   }
 }
 
